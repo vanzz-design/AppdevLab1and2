@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Authorization demo | Vacant Room Checker</title>
+  <meta name="description" content="Interactive demo of authorization: the same system allows or blocks actions depending on the role of the signed-in user.">
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <a class="skip-link" href="#demo">Skip to the demo</a>
+
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="brand" href="index.html">
+        <strong>VRC Labs</strong>
+        <span>Vacant Room Checker, IT 313</span>
+      </a>
+      <nav class="site-nav" aria-label="Main">
+        <a href="index.html">Lab 1: Database connection</a>
+        <a href="lab2.html">Lab 2: AuthN vs AuthZ</a>
+        <a href="authn.html">Authentication demo</a>
+        <a href="authz.html" aria-current="page">Authorization demo</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="page-hero" aria-labelledby="page-title">
+      <div class="page-hero-inner">
+        <h1 id="page-title">Authorization: decide what you may do</h1>
+        <p>Try six actions from the Vacant Room Checker. The system already knows who you are from your token. Now it checks whether your role allows each action.</p>
+      </div>
+    </section>
+
+    <div class="main-wide" id="demo">
+      <noscript><p class="callout callout-warn">This demo needs JavaScript. Turn it on and reload the page.</p></noscript>
+      <p id="unsupported" class="callout callout-warn" hidden>This browser blocks the Web Crypto features the demo uses. Open the page over https (for example on GitHub Pages) or from localhost.</p>
+
+      <!-- Who is asking -->
+      <div class="identity-bar" id="identityBar">
+        <p id="identityText" style="margin:0" aria-live="polite">Checking your session...</p>
+        <div class="field" id="roleField" hidden>
+          <label for="roleSelect">Role stored for this account</label>
+          <select id="roleSelect">
+            <option value="user">user</option>
+            <option value="admin">admin</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="demo-grid">
+        <section class="panel" aria-labelledby="try-title">
+          <h2 id="try-title">Try an action</h2>
+          <p class="sub">Each button sends a request. The server answers with a status code.</p>
+          <ul class="action-grid" id="actionList"></ul>
+        </section>
+
+        <div>
+          <section class="panel" aria-labelledby="log-title">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:1rem">
+              <h2 id="log-title" style="margin:0">Server responses</h2>
+              <button class="btn btn-outline btn-small" id="clearLog" type="button">Clear</button>
+            </div>
+            <ul class="log" id="log" aria-live="polite" style="margin-top:1rem">
+              <li><span class="empty">Nothing yet. Try an action.</span></li>
+            </ul>
+          </section>
+
+          <section class="panel" aria-labelledby="rule-title">
+            <h2 id="rule-title">The rule behind it</h2>
+            <p class="sub">How our real system enforces the last action you tried.</p>
+            <figure class="code" style="margin:0">
+              <figcaption><span id="ruleName">SQL policy</span></figcaption>
+<pre><code id="ruleCode">-- Try an action to see the rule that protects it.</code></pre>
+            </figure>
+          </section>
+        </div>
+      </div>
+
+      <section class="page-section" style="margin-top:3rem">
+        <h2>Who can do what</h2>
+        <p>The highlighted column is the role you are using right now.</p>
+        <div class="table-wrap">
+          <table class="matrix" id="matrix">
+            <thead>
+              <tr><th>Action</th><th data-role="guest">Guest (not signed in)</th><th data-role="user">User</th><th data-role="admin">Admin</th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+
+        <h2>What to notice</h2>
+        <ul>
+          <li><strong>401 and 403 mean different things.</strong> 401 Unauthorized: the server does not know who you are, so sign in. 403 Forbidden: it knows exactly who you are, and your role does not allow the action.</li>
+          <li><strong>Authorization needs authentication first.</strong> Without a valid token every protected action stops at 401. The page checks the token's signature and expiry before it trusts anything in it.</li>
+          <li><strong>Permissions live apart from the login.</strong> The token names the user. The role comes from a separate record, like our <code>profiles</code> table, so an admin can change it without anyone signing in again.</li>
+          <li><strong>The role menu is only for the demo.</strong> In the real system users cannot edit their own role: a database trigger resets <code>role</code>, <code>strike_count</code>, and <code>suspended_until</code> on any update that does not come from an admin.</li>
+        </ul>
+        <div class="callout callout-lesson">
+          <span class="callout-title">Hiding a button is not authorization</span>
+          <p>The web app hides the Admin link from students, but that is only a convenience. The real protection is the database policy shown in "The rule behind it", which still blocks the request if someone calls the API directly.</p>
+        </div>
+        <p><a class="btn btn-green" href="authn.html">Sign in as a different account</a></p>
+      </section>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <p><strong>Vacant Room Checker and Scheduling System</strong></p>
+      <p>Group 6, IT 313 System Integration and Architecture</p>
+      <p>Vandolph Pabillena, Mjhay Trangco, Denjoe Vergara</p>
+    </div>
+  </footer>
+
+  <script src="assets/auth-core.js"></script>
+  <script src="assets/authz.js"></script>
+</body>
+</html>

@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Authentication demo | Vacant Room Checker</title>
+  <meta name="description" content="Interactive demo of authentication: proving who you are with a password, and receiving a signed session token.">
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <a class="skip-link" href="#demo">Skip to the demo</a>
+
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="brand" href="index.html">
+        <strong>VRC Labs</strong>
+        <span>Vacant Room Checker, IT 313</span>
+      </a>
+      <nav class="site-nav" aria-label="Main">
+        <a href="index.html">Lab 1: Database connection</a>
+        <a href="lab2.html">Lab 2: AuthN vs AuthZ</a>
+        <a href="authn.html" aria-current="page">Authentication demo</a>
+        <a href="authz.html">Authorization demo</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="page-hero" aria-labelledby="page-title">
+      <div class="page-hero-inner">
+        <h1 id="page-title">Authentication: prove who you are</h1>
+        <p>Sign in with a demo account and watch each check the server makes. Authentication ends with a signed token that says who you are. It says nothing yet about what you may do.</p>
+      </div>
+    </section>
+
+    <div class="main-wide" id="demo">
+      <noscript><p class="callout callout-warn">This demo needs JavaScript. Turn it on and reload the page.</p></noscript>
+      <p id="unsupported" class="callout callout-warn" hidden>This browser blocks the Web Crypto features the demo uses. Open the page over https (for example on GitHub Pages) or from localhost.</p>
+
+      <div class="demo-grid">
+        <!-- Sign-in form -->
+        <section class="panel" aria-labelledby="signin-title">
+          <h2 id="signin-title">Sign in</h2>
+          <p class="sub">Use one of the demo accounts below.</p>
+
+          <form id="signinForm" novalidate>
+            <div class="field">
+              <label for="email">Email</label>
+              <input id="email" name="email" type="email" autocomplete="username" required>
+            </div>
+            <div class="field">
+              <label for="password">Password</label>
+              <div class="input-row">
+                <input id="password" name="password" type="password" autocomplete="current-password" required>
+                <button class="btn btn-outline btn-small" id="togglePw" type="button" aria-pressed="false">Show</button>
+              </div>
+            </div>
+            <p class="msg" id="msg" role="alert"></p>
+            <button class="btn btn-green" id="submitBtn" type="submit">Sign in</button>
+          </form>
+
+          <div class="creds">
+            <p>Demo accounts</p>
+            <ul>
+              <li><span><code>student@vrc.demo</code> <code>Student#123</code></span> <button class="btn btn-outline btn-small" type="button" data-fill="student">Fill in</button></li>
+              <li><span><code>admin@vrc.demo</code> <code>Admin#123</code></span> <button class="btn btn-outline btn-small" type="button" data-fill="admin">Fill in</button></li>
+            </ul>
+          </div>
+        </section>
+
+        <div>
+          <!-- What the server does -->
+          <section class="panel" aria-labelledby="server-title">
+            <h2 id="server-title">What the server checks</h2>
+            <p class="sub">Each sign-in attempt runs through these steps in order.</p>
+            <ol class="steps" id="steps">
+              <li data-state="idle"><span class="mark">1</span><span><strong>Receive the credentials</strong><small>Email and password arrive over an encrypted connection.</small></span></li>
+              <li data-state="idle"><span class="mark">2</span><span><strong>Find the account</strong><small>Look up the email in the user table.</small></span></li>
+              <li data-state="idle"><span class="mark">3</span><span><strong>Check the password</strong><small>Hash the password with the account's salt and compare it with the stored hash. The real password is never stored.</small></span></li>
+              <li data-state="idle"><span class="mark">4</span><span><strong>Issue a signed token</strong><small>Create a token naming the user, then sign it with a secret only the server knows.</small></span></li>
+              <li data-state="idle"><span class="mark">5</span><span><strong>Start the session</strong><small>The browser keeps the token and sends it with every later request.</small></span></li>
+            </ol>
+            <p class="sub" id="serverLog" style="margin:1rem 0 0" aria-live="polite">Server log: waiting for a sign-in attempt.</p>
+          </section>
+
+          <!-- Session -->
+          <section class="panel" aria-labelledby="session-title" id="sessionPanel" hidden>
+            <h2 id="session-title">You are authenticated</h2>
+            <p class="sub">The server now knows who you are. Here is the proof it gave your browser.</p>
+            <div class="session-box">
+              <dl>
+                <dt>Name</dt><dd id="sName"></dd>
+                <dt>Email</dt><dd id="sEmail"></dd>
+                <dt>Token expires in</dt><dd id="sExpires"></dd>
+              </dl>
+              <div class="hero-actions" style="margin-top:0">
+                <a class="btn btn-green" href="authz.html">Test what this account can do</a>
+                <button class="btn btn-outline" id="signOutBtn" type="button">Sign out</button>
+              </div>
+            </div>
+            <p class="sub" style="margin:1rem 0 0.3rem">The token has three parts separated by dots: the header, the claims about you, and the signature.</p>
+            <pre class="token" id="tokenView" tabindex="0"></pre>
+          </section>
+        </div>
+      </div>
+
+      <section class="page-section" style="margin-top:3rem">
+        <h2>What to notice</h2>
+        <ul>
+          <li><strong>The error message is vague on purpose.</strong> A wrong email and a wrong password both show "Invalid login credentials". The precise reason appears only in the server log, so an attacker cannot learn which emails exist.</li>
+          <li><strong>Attempts are limited.</strong> Three wrong tries lock the form for 20 seconds, which slows down password guessing.</li>
+          <li><strong>The token carries identity, not permissions.</strong> It contains a user ID and an expiry time. Decide what the user may do on the <a href="authz.html">authorization page</a>.</li>
+          <li><strong>The signature stops tampering.</strong> Change one character of the token and the server rejects it, because the signature no longer matches.</li>
+        </ul>
+        <div class="callout callout-note">
+          <span class="callout-title">How this maps to our real system</span>
+          <p>In the Vacant Room Checker, Supabase Auth runs these steps on its own servers. The browser calls <code>supabase.auth.signInWithPassword()</code> and gets back a session containing a signed token (JWT). This page imitates that flow in the browser so you can see it, which a real system must never do: the user list, salts, and signing secret would stay on the server.</p>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <p><strong>Vacant Room Checker and Scheduling System</strong></p>
+      <p>Group 6, IT 313 System Integration and Architecture</p>
+      <p>Vandolph Pabillena, Mjhay Trangco, Denjoe Vergara</p>
+    </div>
+  </footer>
+
+  <script src="assets/auth-core.js"></script>
+  <script src="assets/authn.js"></script>
+</body>
+</html>
