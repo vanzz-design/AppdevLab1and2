@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lab 1: Cloud Database Connection | Vacant Room Checker</title>
+  <meta name="description" content="Step-by-step guide showing how the Vacant Room Checker connects an ESP32 RFID reader and a React web app to a Supabase cloud database.">
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <a class="skip-link" href="#guide">Skip to the guide</a>
+
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="brand" href="index.html">
+        <strong>VRC Labs</strong>
+        <span>Vacant Room Checker, IT 313</span>
+      </a>
+      <nav class="site-nav" aria-label="Main">
+        <a href="index.html" aria-current="page">Lab 1: Database connection</a>
+        <a href="lab2.html">Lab 2: AuthN vs AuthZ</a>
+        <a href="authn.html">Authentication demo</a>
+        <a href="authz.html">Authorization demo</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <!-- ================= HERO ================= -->
+    <section class="hero" aria-labelledby="page-title">
+      <div class="hero-inner">
+        <div>
+          <h1 id="page-title">Lab 1: Cloud Database Connection</h1>
+          <p class="hero-lead">How our Vacant Room Checker connects an ESP32 card reader and a React web app to one Supabase database, with every step we followed and every error we hit along the way.</p>
+          <div class="hero-meta">
+            <p><strong>Group 6</strong>, IT 313 System Integration and Architecture</p>
+            <p>Vandolph Pabillena, Mjhay Trangco, Denjoe Vergara</p>
+            <p>Isabela State University, Santiago City Extension Campus</p>
+          </div>
+          <div class="hero-actions">
+            <a class="btn btn-gold" href="#step-1">Start the guide</a>
+            <a class="btn btn-ghost" href="lab2.html">Go to Lab 2</a>
+          </div>
+        </div>
+
+        <!-- One card tap, end to end -->
+        <div class="pipeline" id="pipeline">
+          <div class="pipe-head">
+            <h2>Follow one card tap</h2>
+            <button class="btn btn-gold btn-small" id="tapBtn" type="button">Tap a card</button>
+          </div>
+          <ol class="pipe-stages">
+            <li data-state="idle"><span class="dot">1</span><span><strong>ESP32 reads the card</strong><small>RC522 reader at the room door</small></span></li>
+            <li data-state="idle"><span class="dot">2</span><span><strong>HTTPS request to Supabase</strong><small>REST API, publishable key</small></span></li>
+            <li data-state="idle"><span class="dot">3</span><span><strong>PostgreSQL stores the tap</strong><small>A trigger updates the room</small></span></li>
+            <li data-state="idle"><span class="dot">4</span><span><strong>Realtime pushes the change</strong><small>WebSocket to every open browser</small></span></li>
+            <li data-state="idle"><span class="dot">5</span><span><strong>Dashboard card updates</strong><small>No page refresh</small></span></li>
+          </ol>
+          <pre class="pipe-out" id="pipeOut" aria-live="polite">Press "Tap a card" to watch the request travel from the door to the dashboard.</pre>
+          <div class="room-chip" id="roomChip">
+            <strong>CS-101</strong>
+            <span class="pill pill-vacant" id="roomPill">Vacant</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= GUIDE ================= -->
+    <div class="doc" id="guide">
+      <nav class="toc" aria-label="On this page">
+        <h2>On this page</h2>
+        <ol>
+          <li><a href="#overview">What we connected</a></li>
+          <li><a href="#architecture">How the parts fit</a></li>
+          <li><a href="#step-1">Step 1: Create the project</a></li>
+          <li><a href="#step-2">Step 2: Create the tables</a></li>
+          <li><a href="#step-3">Step 3: Copy the keys</a></li>
+          <li><a href="#step-4">Step 4: Lock the tables down</a></li>
+          <li><a href="#step-5">Step 5: Connect the ESP32</a></li>
+          <li><a href="#step-6">Step 6: Connect the React app</a></li>
+          <li><a href="#step-7">Step 7: Turn on real-time</a></li>
+          <li><a href="#step-8">Step 8: Automate with triggers</a></li>
+          <li><a href="#step-9">Step 9: Test the connection</a></li>
+          <li><a href="#troubleshooting">Errors we hit</a></li>
+          <li><a href="#security">Security checklist</a></li>
+          <li><a href="#summary">What we learned</a></li>
+        </ol>
+      </nav>
+
+      <article class="article">
+
+        <section id="overview">
+          <h2>What we connected</h2>
+          <p>The Vacant Room Checker decides whether a room is vacant or occupied from RFID card taps. Those taps have to be stored somewhere that both the hardware and the web app can reach, from any network.</p>
+          <p>We chose <strong>Supabase</strong>, a hosted PostgreSQL database that also gives us a REST API, user sign-in, and live updates without writing a server. Our first proposal used PHP and MySQL on XAMPP, which only works on one computer. Supabase let a microcontroller in a classroom and a browser anywhere share the same data.</p>
+          <p>Two different clients talk to the same project:</p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Client</th><th>How it connects</th><th>What it does</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>ESP32 with RC522 reader (C++)</td><td>HTTPS calls to the REST API</td><td>Saves each card tap, reads the room status, sends a heartbeat</td></tr>
+                <tr><td>React web app (Vite, TypeScript)</td><td>The <code>@supabase/supabase-js</code> library</td><td>Shows live rooms, signs users in, books rooms, shows analytics</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="architecture">
+          <h2>How the parts fit</h2>
+          <p>Everything goes through the Supabase project. The hardware never talks to the web app directly, so either side can be offline without breaking the other.</p>
+
+          <figure class="figure">
+            <svg viewBox="0 0 860 340" role="img" aria-labelledby="arch-title arch-desc" xmlns="http://www.w3.org/2000/svg">
+              <title id="arch-title">System architecture</title>
+              <desc id="arch-desc">The ESP32 sends HTTPS requests to the Supabase REST API. The React app uses supabase-js to query, sign in, and subscribe. Inside Supabase, the REST API writes to PostgreSQL, which feeds Realtime, and triggers and pg_cron act on the data.</desc>
+              <defs>
+                <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                  <path d="M0 0L10 5L0 10z" fill="#c99a16"/>
+                </marker>
+              </defs>
+              <g font-family="Instrument Sans, system-ui, sans-serif" font-size="15">
+                <rect x="20" y="40" width="210" height="90" rx="16" fill="#0e5834"/>
+                <text x="125" y="78" text-anchor="middle" fill="#fff" font-weight="700">ESP32 + RC522</text>
+                <text x="125" y="102" text-anchor="middle" fill="#b3e0c5" font-size="13">C++, Arduino framework</text>
+
+                <rect x="20" y="210" width="210" height="90" rx="16" fill="#0e5834"/>
+                <text x="125" y="248" text-anchor="middle" fill="#fff" font-weight="700">React web app</text>
+                <text x="125" y="272" text-anchor="middle" fill="#b3e0c5" font-size="13">Vite, TypeScript, supabase-js</text>
+
+                <rect x="330" y="10" width="510" height="320" rx="22" fill="#eff9f3" stroke="#0e5834" stroke-width="2"/>
+                <text x="355" y="42" fill="#06301f" font-weight="700" font-size="16">Supabase project</text>
+
+                <rect x="355" y="62" width="205" height="70" rx="14" fill="#fff" stroke="#b3e0c5"/>
+                <text x="457" y="92" text-anchor="middle" fill="#06301f" font-weight="700">REST API</text>
+                <text x="457" y="113" text-anchor="middle" fill="#4a6055" font-size="13">/rest/v1/rfid_logs</text>
+
+                <rect x="620" y="62" width="195" height="70" rx="14" fill="#fff" stroke="#b3e0c5"/>
+                <text x="717" y="92" text-anchor="middle" fill="#06301f" font-weight="700">PostgreSQL</text>
+                <text x="717" y="113" text-anchor="middle" fill="#4a6055" font-size="13">rfid_logs, rooms, bookings</text>
+
+                <rect x="355" y="160" width="205" height="70" rx="14" fill="#fff" stroke="#b3e0c5"/>
+                <text x="457" y="190" text-anchor="middle" fill="#06301f" font-weight="700">Auth</text>
+                <text x="457" y="211" text-anchor="middle" fill="#4a6055" font-size="13">Email, password, sessions</text>
+
+                <rect x="620" y="160" width="195" height="70" rx="14" fill="#fff" stroke="#b3e0c5"/>
+                <text x="717" y="190" text-anchor="middle" fill="#06301f" font-weight="700">Realtime</text>
+                <text x="717" y="211" text-anchor="middle" fill="#4a6055" font-size="13">WebSocket updates</text>
+
+                <rect x="355" y="252" width="460" height="56" rx="14" fill="#fbefc2" stroke="#e3b62a"/>
+                <text x="585" y="276" text-anchor="middle" fill="#3c2c0a" font-weight="700">Triggers and pg_cron</text>
+                <text x="585" y="296" text-anchor="middle" fill="#3c2c0a" font-size="13">Update the room on every tap, cancel ghost bookings</text>
+
+                <line x1="230" y1="85" x2="350" y2="95" stroke="#c99a16" stroke-width="3" marker-end="url(#arrow)"/>
+                <text x="236" y="70" fill="#06301f" font-size="12" font-weight="600">HTTPS POST</text>
+
+                <line x1="560" y1="97" x2="616" y2="97" stroke="#c99a16" stroke-width="3" marker-end="url(#arrow)"/>
+                <line x1="717" y1="132" x2="717" y2="156" stroke="#c99a16" stroke-width="3" marker-end="url(#arrow)"/>
+
+                <line x1="326" y1="255" x2="234" y2="255" stroke="#c99a16" stroke-width="3" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+                <text x="236" y="242" fill="#06301f" font-size="12" font-weight="600">sign-in, data</text>
+                <text x="236" y="284" fill="#06301f" font-size="12" font-weight="600">live updates</text>
+              </g>
+            </svg>
+            <figcaption>The ESP32 writes to the database. The web app reads from it, signs users in, and listens for changes.</figcaption>
+          </figure>
+        </section>
+
+        <section id="step-1">
+          <h2>Step 1: Create the project</h2>
+          <ol>
+            <li>Sign in at <a href="https://supabase.com" rel="noopener">supabase.com</a> and create an organization. We named ours <strong>VRC_System</strong> and used the Free plan.</li>
+            <li>Choose <strong>New project</strong> and name it <strong>Vacant-Room-Checker</strong>.</li>
+            <li>Set a database password and save it in a password manager, because the dashboard will not show it again. Pick the region closest to you.</li>
+            <li>Wait a minute or two for the project to finish provisioning. The dashboard opens when it is ready.</li>
+          </ol>
+          <div class="callout callout-note">
+            <span class="callout-title">Before a demo</span>
+            <p>Free-plan projects can be paused after a stretch of inactivity. Open the dashboard the day before you present, and restore the project if it shows as paused.</p>
+          </div>
+        </section>
+
+        <section id="step-2">
+          <h2>Step 2: Create the tables</h2>
+          <p>We started with the one table the hardware needs, <code>rfid_logs</code>. Every card tap becomes one row. In the dashboard we opened <strong>Table Editor</strong>, chose <strong>New table</strong>, and added these columns:</p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Column</th><th>Type</th><th>Purpose</th></tr>
+              </thead>
+              <tbody>
+                <tr><td><code>id</code></td><td>uuid, primary key, default <code>gen_random_uuid()</code></td><td>Unique ID for each tap</td></tr>
+                <tr><td><code>card_uid</code></td><td>text</td><td>Card number the reader saw, such as <code>A1B2C3D4</code></td></tr>
+                <tr><td><code>room_id</code></td><td>text</td><td>Which room's reader sent it, such as <code>CS-101</code></td></tr>
+                <tr><td><code>status</code></td><td>text</td><td><code>Occupied</code> or <code>Vacant</code></td></tr>
+                <tr><td><code>created_at</code></td><td>timestamptz, default <code>now()</code></td><td>When the tap happened</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p>The same table written as SQL, which you can paste into the <strong>SQL Editor</strong>:</p>
+          <figure class="code">
+            <figcaption><span>SQL</span><button class="copy" type="button">Copy</button></figcaption>
+<pre><code>create table if not exists public.rfid_logs (
+  id         uuid primary key default gen_random_uuid(),
+  card_uid   text not null,
+  room_id    text not null,
+  status     text not null,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.rooms (
+  id          text primary key,            -- 'CS-101', matches the ESP32 firmware
+  name        text not null,
+  building    text,
+  capacity    int  default 40,
+  status      text not null default 'Vacant'
+              check (status in ('Vacant', 'Occupied')),
+  last_tap_at timestamptz
+);</code></pre>
+          </figure>
+          <p>As the project grew we added four more tables:</p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Table</th><th>What it stores</th></tr>
+              </thead>
+              <tbody>
+                <tr><td><code>profiles</code></td><td>One row per user: name, student ID, role (<code>user</code> or <code>admin</code>), RFID card, strike count</td></tr>
+                <tr><td><code>bookings</code></td><td>Room reservations with start and end time and a status</td></tr>
+                <tr><td><code>penalties</code></td><td>One row for every no-show strike</td></tr>
+                <tr><td><code>device_heartbeats</code></td><td>The last time each ESP32 reported in</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="step-3">
+          <h2>Step 3: Copy the keys</h2>
+          <p>Every client needs two values: where the project lives, and a key that proves the request belongs to it. In the dashboard, open <strong>Project Settings</strong>, then <strong>API Keys</strong>. The <strong>Connect</strong> button at the top of the dashboard shows the same values.</p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Value</th><th>Looks like</th><th>Where it may be used</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>Project URL</td><td><code>https://YOUR-PROJECT-REF.supabase.co</code></td><td>Firmware and web app</td></tr>
+                <tr><td>Publishable key</td><td><code>sb_publishable_...</code></td><td>Firmware and web app. It is designed to be public, but only safe when Row Level Security is on (Step 4).</td></tr>
+                <tr><td>Secret key</td><td><code>sb_secret_...</code></td><td>Never. It bypasses every security rule. Keep it off the ESP32, out of the React app, and out of GitHub.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="callout callout-warn">
+            <span class="callout-title">Use placeholders in anything you publish</span>
+            <p>This guide writes <code>YOUR-PROJECT-REF</code> and <code>sb_publishable_...</code> instead of our real values. Do the same in your own repository.</p>
+          </div>
+        </section>
+
+        <section id="step-4">
+          <h2>Step 4: Lock the tables down</h2>
+          <p>Because the publishable key sits inside the firmware and the web page, anyone can find it. The database must therefore decide what that key is allowed to do. Two layers work together:</p>
+          <ul>
+            <li><strong>Row Level Security (RLS)</strong> uses policies to decide which rows a role may touch.</li>
+            <li><strong>Grants</strong> decide whether a role may touch the table at all. Without a grant, a policy is never reached.</li>
+          </ul>
+          <p>Requests that use only the publishable key run as the <code>anon</code> role. Signed-in users run as <code>authenticated</code>. Our rules:</p>
+          <figure class="code">
+            <figcaption><span>SQL</span><button class="copy" type="button">Copy</button></figcaption>
+<pre><code>-- helper: is the signed-in user an admin?
+create or replace function public.is_admin() returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (
+    select 1 from public.profiles
+    where id = auth.uid() and role = 'admin'
+  );
+$$;
+
+alter table public.rooms     enable row level security;
+alter table public.rfid_logs enable row level security;
+
+-- anyone may see room status (public dashboard)
+create policy "rooms public read" on public.rooms
+  for select to anon, authenticated using (true);
+
+-- the ESP32 may add taps, but only admins may read them
+create policy "device insert" on public.rfid_logs
+  for insert to anon, authenticated with check (true);
+create policy "admin read logs" on public.rfid_logs
+  for select to authenticated using (public.is_admin());
+
+-- table-level permissions
+grant usage on schema public to anon, authenticated;
+grant select on public.rooms to anon;
+grant select, insert, update on public.device_heartbeats to anon, authenticated;</code></pre>
+          </figure>
+          <div class="callout callout-lesson">
+            <span class="callout-title">What went wrong for us</span>
+            <p>Our <code>rfid_logs</code> table started with a policy named "Allow anonymous reads". It let anyone holding the publishable key list every card number ever tapped. Check yours with the query below and drop any policy you did not mean to create.</p>
+          </div>
+          <figure class="code">
+            <figcaption><span>SQL</span><button class="copy" type="button">Copy</button></figcaption>
+<pre><code>select policyname, cmd, roles from pg_policies where tablename = 'rfid_logs';
+
+drop policy if exists "Allow anonymous reads" on public.rfid_logs;</code></pre>
+          </figure>
+        </section>
+
+        <section id="step-5">
+          <h2>Step 5: Connect the ESP32</h2>
+          <p>The ESP32 does not need a Supabase library. Supabase turns every table into a REST endpoint, so the firmware only has to send an HTTPS request with the right headers.</p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Header</th><th>Value</th><th>Why</th></tr>
+              </thead>
+              <tbody>
+                <tr><td><code>apikey</code></td><td>the publishable key</td><td>Identifies the project</td></tr>
+                <tr><td><code>Authorization</code></td><td><code>Bearer</code> plus the same key</td><td>Makes the request run as the <code>anon</code> role</td></tr>
+                <tr><td><code>Content-Type</code></td><td><code>application/json</code></td><td>The body is JSON</td></tr>
+                <tr><td><code>Prefer</code></td><td><code>return=minimal</code></td><td>Do not send the new row back, since <code>anon</code> is not allowed to read <code>rfid_logs</code></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p>This is the heart of our firmware. It builds the request, posts the tap, and treats HTTP status <strong>201 Created</strong> as success.</p>
+          <figure class="code">
+            <figcaption><span>C++ (main.cpp)</span><button class="copy" type="button">Copy</button></figcaption>
+<pre><code>#include &lt;WiFi.h&gt;
+#include &lt;HTTPClient.h&gt;
+
+const char* SUPABASE_BASE = "https://YOUR-PROJECT-REF.supabase.co/rest/v1";
+const char* SUPABASE_KEY  = "sb_publishable_...";   // never the secret key
+String roomId = "CS-101";
+
+bool sendTap(const String&amp; uid, const String&amp; status) {
+  HTTPClient http;
+  http.begin(String(SUPABASE_BASE) + "/rfid_logs");
+
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("apikey", SUPABASE_KEY);
+  http.addHeader("Authorization", String("Bearer ") + SUPABASE_KEY);
+  http.addHeader("Prefer", "return=minimal");
+
+  String payload = "{\"card_uid\":\"" + uid +
+                   "\",\"room_id\":\"" + roomId +
+                   "\",\"status\":\"" + status + "\"}";
+
+  int code = http.POST(payload);
+  Serial.println("HTTP " + String(code));   // 201 means the row was created
+  http.end();
+  return code == 201;
+}</code></pre>
+          </figure>
+          <p>The same pattern reads data. To find out the current room status we send a <code>GET</code> with a filter in the URL:</p>
+          <figure class="code">
+            <figcaption><span>HTTP</span><button class="copy" type="button">Copy</button></figcaption>
+<pre><code>GET /rest/v1/rooms?id=eq.CS-101&amp;select=status
+apikey: sb_publishable_...
+
+[{"status":"Occupied"}]</code></pre>
+          </figure>
+          <p>When the Serial Monitor (baud rate 115200) shows this, the hardware side is connected:</p>
+          <figure class="code">
+            <figcaption><span>Serial Monitor</span><button class="copy" type="button">Copy</button></figcaption>
+<pre><code>Wi-Fi connected
+Uploading tap: A1B2C3D4
+HTTP 201
+Supabase upload successful: A1B2C3D4</code></pre>
+          </figure>
+          <h3>If Wi-Fi drops</h3>
+          <p>A second ESP32 stores taps in its own flash memory and hands them back over a serial cable when the main board is online again. Each tap carries a unique ID and its original time, so a late upload never counts twice and never loses its real timestamp. This is why <code>rfid_logs</code> has a <code>client_tap_id</code> column with a unique index.</p>
+        </section>
+
+        <section id="step-6">
+          <h2>Step 6: Connect the React app</h2>
+          <p>The web app uses the official JavaScript library, which wraps the same REST API and adds sign-in and live updates.</p>
+          <figure class="code">
+            <figcaption><span>Terminal</span><button class="copy" type="button">Copy</button></figcaption>
+<pre><code>npm create vite@latest vacant-room-web -- --template react-ts
+cd vacant-room-web
+npm install @supabase/supabase-js react-router-dom</code></pre>
+          </figure>
+          <p>Create a file named <code>.env</code> in the project root, next to <code>package.json</code>. Vite only exposes variables that start with <code>VITE_</code>.</p>
+          <figure class="code">
+            <figcaption><span>.env</span><button class="copy" type="button">Copy</button></figcaption>
+<pre><code>VITE_SUPABASE_URL=https://YOUR-PROJECT-REF.supabase.co
+VITE_SUPABASE_KEY=sb_publishable_...</code></pre>
+          </figure>
+          <p>Then create the client once and import it wherever it is needed:</p>
+          <figure class="code">
+            <figcaption><span>src/lib/supabase.ts</span><button class="copy" type="button">Copy</button></figcaption>
+<pre><code>import { createClient } from '@supabase/supabase-js'
+
+export const supabase = createClient(
+  import.meta.env.VITE_SUPABASE_URL,
+  import.meta.env.VITE_SUPABASE_KEY
+)
+
+// anywhere in the app:
+const { data, error } = await supabase
+  .from('rooms')
+  .select('*')
+  .order('id')</code></pre>
+          </figure>
+          <div class="callout callout-warn">
+            <span class="callout-title">Restart after editing .env</span>
+            <p>Vite reads <code>.env</code> only when it starts. Stop the dev server with <code>Ctrl + C</code>, run <code>npm run dev</code> again, and add <code>.env</code> to <code>.gitignore</code> so it is not uploaded to GitHub.</p>
+          </div>
+        </section>
+
+        <section id="step-7">
+          <h2>Step 7: Turn on real-time</h2>
+          <p>Realtime streams table changes to the browser over a WebSocket. It is off for each table until you add the table to the <code>supabase_realtime</code> publication.</p>
+          <figure class="code">
+            <figcaption><span>SQL</span><button class="copy" type="button">Copy</button></figcaption>
+<pre><code>alter publication supabase_realtime add table public.rooms;</code></pre>
+          </figure>
+          <p>In React we subscribe to changes on <code>rooms</code> and update the screen when one arrives:</p>
+          <figure class="code">
+            <figcaption><span>src/hooks/useRooms.ts</span><button class="copy" type="button">Copy</button></figcaption>
+<pre><code>const channel = supabase
+  .channel('rooms-live')
+  .on('postgres_changes',
+      { event: '*', schema: 'public', table: 'rooms' },
+      payload =&gt; {
+        const room = payload.new as Room
+        setRooms(prev =&gt; prev.map(r =&gt; (r.id === room.id ? room : r)))
+      })
+  .subscribe(status =&gt; {
+    if (status === 'SUBSCRIBED') loadRooms()   // refetch so nothing is missed
+  })
+
+// when the component goes away:
+supabase.removeChannel(channel)</code></pre>
+          </figure>
+          <div class="callout callout-note">
+            <span class="callout-title">Why we listen to rooms, not rfid_logs</span>
+            <p>Public visitors may see room status but not card numbers. The tap history stays private, and a trigger (next step) copies just the status into <code>rooms</code>, which everyone may watch.</p>
+          </div>
+        </section>
+
+        <section id="step-8">
+          <h2>Step 8: Automate with triggers</h2>
+          <p>The ESP32 only inserts a row. A database trigger does the rest, so the logic lives in one place and cannot drift between the hardware and the web app.</p>
+          <figure class="code">
+            <figcaption><span>SQL (simplified)</span><button class="copy" type="button">Copy</button></figcaption>
+<pre><code>create or replace function public.handle_rfid_log() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  update public.rooms
+     set status = new.status, last_tap_at = new.created_at
+   where id = new.room_id;
+  return new;
+end $$;
+
+create trigger trg_rfid_log
+  after insert on public.rfid_logs
+  for each row execute function public.handle_rfid_log();</code></pre>
+          </figure>
+          <p>Our full version also checks the user in to their booking and lets the database, not the ESP32, decide whether a tap means Occupied or Vacant. A scheduled job runs every minute to cancel bookings whose owner never tapped in within 15 minutes:</p>
+          <figure class="code">
+            <figcaption><span>SQL</span><button class="copy" type="button">Copy</button></figcaption>
+<pre><code>create extension if not exists pg_cron;
+
+select cron.schedule(
+  'ghost-booking-sweep',
+  '* * * * *',
+  $$select public.process_ghost_bookings()$$
+);</code></pre>
+          </figure>
+        </section>
+
+        <section id="step-9">
+          <h2>Step 9: Test the connection</h2>
+          <p>Test from the hardware outward. Each check proves one link in the chain.</p>
+          <ol>
+            <li><strong>ESP32 to database.</strong> Tap a card. The Serial Monitor prints <code>HTTP 201</code>.</li>
+            <li><strong>Row stored.</strong> In <strong>Table Editor</strong>, open <code>rfid_logs</code>. A new row appears with your card number and the time.</li>
+            <li><strong>Trigger worked.</strong> Run the query below. The room's status matches the tap.</li>
+            <li><strong>Web app to database.</strong> Open <code>http://localhost:5173</code>. The <code>CS-101</code> card appears.</li>
+            <li><strong>Realtime.</strong> Keep the browser visible and tap again. The card flips between Vacant and Occupied with no refresh, and the dot beside "Live" stays green.</li>
+          </ol>
+          <figure class="code">
+            <figcaption><span>SQL</span><button class="copy" type="button">Copy</button></figcaption>
+<pre><code>select id, status, last_tap_at from public.rooms;
+
+select card_uid, status, created_at
+from public.rfid_logs
+order by created_at desc
+limit 5;</code></pre>
+          </figure>
+        </section>
+
+        <section id="troubleshooting">
+          <h2>Errors we hit</h2>
+          <p>These are the real problems we ran into while connecting the system, and what fixed each one.</p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>What we saw</th><th>Cause</th><th>Fix</th></tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>ESP32 prints <code>Status fetch failed: 401</code> or <code>Heartbeat: 401</code> while taps still work</td>
+                  <td>Tables created with SQL had no grants for the <code>anon</code> role, so Postgres answered "permission denied"</td>
+                  <td>Run the <code>grant</code> statements from Step 4</td>
+                </tr>
+                <tr>
+                  <td>The dashboard shows "Loading rooms" and "Reconnecting", and the browser console lists WebSocket failures</td>
+                  <td>The <code>.env</code> file still held placeholder text (<code>&lt;your sb_publishable key&gt;</code>) instead of the real key</td>
+                  <td>Paste the real key with no brackets or quotes, restart <code>npm run dev</code>, hard-refresh with <code>Ctrl + Shift + R</code></td>
+                </tr>
+                <tr>
+                  <td>Room list is empty but "Live" is green</td>
+                  <td>The table has no rows, or the public read policy or grant is missing</td>
+                  <td>Insert the room, then check the <code>rooms public read</code> policy and the <code>select</code> grant</td>
+                </tr>
+                <tr>
+                  <td><code>22P02 invalid input syntax for type uuid</code> in the SQL Editor</td>
+                  <td>A placeholder or an email address was typed where a UUID belongs</td>
+                  <td>Look the id up from <code>auth.users</code> by email instead of typing it</td>
+                </tr>
+                <tr>
+                  <td>Sign-in says "Invalid login credentials"</td>
+                  <td>The account does not exist yet, the email is unconfirmed, or the password differs</td>
+                  <td>Check <strong>Authentication, Users</strong>, create the user with Auto Confirm ticked, or reset the password</td>
+                </tr>
+                <tr>
+                  <td>The site opens on port 5174 and an old page lingers on 5173</td>
+                  <td>Two dev servers were running at once</td>
+                  <td>Close the extra terminal and keep one <code>npm run dev</code></td>
+                </tr>
+                <tr>
+                  <td>Offline taps reach the database with the sync time, not the tap time</td>
+                  <td>The tap was uploaded without its own timestamp</td>
+                  <td>Send <code>created_at</code> from the stored tap and let the trigger use it</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="security">
+          <h2>Security checklist</h2>
+          <p>Before sharing the project or uploading it to GitHub, confirm each item:</p>
+          <ul class="checklist">
+            <li>Row Level Security is on for every table in the <code>public</code> schema.</li>
+            <li>No policy lets <code>anon</code> read <code>rfid_logs</code> or <code>profiles</code>.</li>
+            <li>The secret key appears nowhere in the firmware, the React code, or the repository.</li>
+            <li><code>.env</code> is listed in <code>.gitignore</code>.</li>
+            <li>The Wi-Fi password is not in the repository (keep it in a separate header file that is ignored).</li>
+            <li>Admin rights come from <code>profiles.role</code> in the database, never from something the browser can change.</li>
+          </ul>
+          <p>You can check the first item with this query. Every row should show <code>true</code>:</p>
+          <figure class="code">
+            <figcaption><span>SQL</span><button class="copy" type="button">Copy</button></figcaption>
+<pre><code>select tablename, rowsecurity
+from pg_tables
+where schemaname = 'public'
+order by tablename;</code></pre>
+          </figure>
+        </section>
+
+        <section id="summary">
+          <h2>What we learned</h2>
+          <ul>
+            <li>A cloud database gives separate devices one shared source of truth. The ESP32 and the browser never talk to each other.</li>
+            <li>The publishable key is public by design. Security comes from Row Level Security and grants, so set them up before the first real tap.</li>
+            <li>Putting the logic in database triggers kept the firmware simple and made the web app update itself through Realtime.</li>
+            <li>Most of our delays were permission and configuration errors, not code. Reading the exact HTTP status or console message pointed to the fix every time.</li>
+          </ul>
+          <h3>Continue</h3>
+          <p>Lab 2 looks at who is allowed to use this database: <a href="lab2.html">authentication versus authorization</a>, with a <a href="authn.html">sign-in demo</a> and an <a href="authz.html">access-control demo</a>.</p>
+          <h3>References</h3>
+          <ul>
+            <li><a href="https://supabase.com/docs/guides/api" rel="noopener">Supabase: REST API</a></li>
+            <li><a href="https://supabase.com/docs/guides/database/postgres/row-level-security" rel="noopener">Supabase: Row Level Security</a></li>
+            <li><a href="https://supabase.com/docs/guides/realtime" rel="noopener">Supabase: Realtime</a></li>
+            <li><a href="https://supabase.com/docs/reference/javascript/introduction" rel="noopener">Supabase: JavaScript client</a></li>
+          </ul>
+        </section>
+
+      </article>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <p><strong>Vacant Room Checker and Scheduling System</strong></p>
+      <p>Group 6, IT 313 System Integration and Architecture</p>
+      <p>Vandolph Pabillena, Mjhay Trangco, Denjoe Vergara</p>
+      <p>Isabela State University, Santiago City Extension Campus</p>
+    </div>
+  </footer>
+
+  <script src="assets/site.js"></script>
+</body>
+</html>
